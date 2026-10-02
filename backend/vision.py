@@ -75,7 +75,7 @@ def extract_expense_from_receipt(image_bytes:bytes)->dict:
     "expense_date": null,
     "currency": "PKR",
     "total": 0,
-    "tax": null,
+    "tax":null
     "category": "other",
     "payment_method": "unknown",
     "items": [],

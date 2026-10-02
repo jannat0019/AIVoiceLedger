@@ -16,6 +16,8 @@ class ExpenseDraft(BaseModel):
     currency:str="PKR"
 
     total:float =Field(gt=0)
+    
+    tax :float=0
 
     category: Literal[
         "food",
@@ -39,5 +41,9 @@ class ExpenseDraft(BaseModel):
 
     uncertain_fields: list[str] = []
 
-class ConfirmedReceipt(BaseModel):
-    source:  Literal["receipt", "voice", "manual"] = "receipt"
+class CreateExpenseRequest(ExpenseDraft):
+    source: Literal["voice", "receipt", "manual"]
+
+
+class ExpenseResponse(CreateExpenseRequest):
+    id: str
