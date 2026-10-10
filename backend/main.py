@@ -3,14 +3,28 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from schemas import ExpenseDraft,CreateExpenseRequest
 from vision import extract_expense_from_receipt
 from database import supabase
+
+from fastapi import Depends
+
+from auth import AuthenticatedUser, get_current_user
 app=FastAPI(title="Voiceledger AI")
+
+@app.get("/auth/me")
+def get_me(
+    current_user:AuthenticatedUser=Depends(get_current_user),
+):
+    return{
+        "user_Id":current_user.user_id
+    }
+
+
 
 @app.get("/health")
 def health():
     return{"status":"ok"}
 
 @app.post("/extract/receipt", response_model=ExpenseDraft)
-async def extract_receipt(file: UploadFile=File(...)):
+async def extract_receipt(file: UploadFile=File(...),current_user: AuthenticatedUser = Depends(get_current_user)):
 
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -43,13 +57,15 @@ async def extract_receipt(file: UploadFile=File(...)):
         )
 
 @app.post("/expenses", response_model=ExpenseDraft)
-def create_expense(expense: CreateExpenseRequest):
+def create_expense(expense: CreateExpenseRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user)):
 
     """
     Save a confirmed expense to DB
     """
 
     expense_data={
+        "user_id":current_user.user_id,
         "merchant":expense.merchant,
         "expense_date": (expense.expense_date.isoformat()
                           if expense.expense_date else None),
@@ -65,7 +81,7 @@ def create_expense(expense: CreateExpenseRequest):
     }
 
     try:
-        response=(supabase.table("expenses")
+        response=(current_user.db.table("expenses")
                         .insert(expense_data)
                         .execute()
         )
@@ -90,14 +106,14 @@ def create_expense(expense: CreateExpenseRequest):
     }
 
 @app.get("/expenses")
-def get_expenses():
+def get_expenses(current_user: AuthenticatedUser = Depends(get_current_user)):
 
     """
     Return saved expenses
     """
     try:
         response=(
-            supabase.table("expenses")
+            current_user.db.table("expenses")
             .select("*")
             .order("created_at", desc=True)
             .execute())
