@@ -1,88 +1,93 @@
 
 import os
-from fastapi import Header, HTTPException, Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from supabase import Client, create_client
-from supabase.lib.client_options import ClientOptions
-from database import supabase
-
-
 from dataclasses import dataclass
 
-SUPABASE_URL=os.environ.get("SUPABASE_URL"),
-SUPABASE_KEY=os.environ.get("SUPABASE_KEY")
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
+from supabase import Client, create_client
+from supabase.lib.client_options import ClientOptions
+
+
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError(
         "SUPABASE_URL and SUPABASE_KEY must be configured."
     )
 
-bearer_scheme=HTTPBearer(auto_error=False)
+
+# Extract the Bearer token from the request.
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class AuthenticatedUser:
-    id:str
-    email:str | None
+    user_id: str
+    email: str | None
     access_token: str
+    db: Client
+
 
 def get_current_user(
-credentials: HTTPAuthorizationCredentials | None=Depends(bearer_scheme), 
-)-> AuthenticatedUser:
-
-    """Validate the supabase access token
-    and create a database client scoped to that user's JWT"""
+    credentials: HTTPAuthorizationCredentials | None = Depends(
+        bearer_scheme
+    ),
+) -> AuthenticatedUser:
 
     if credentials is None:
         raise HTTPException(
             status_code=401,
             detail="Authentication required.",
-            headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if credentials.scheme.lower()!="bearer":
-        raise HTTPException(
-            status_code=401,
-            detail="Bearer authentication required.",
-        )
-
-    token=credentials.credentials
+    token = credentials.credentials
 
     try:
-
-        """create a fresh client for this request"""
-
-        db=create_client(
+        # Client 1: validate the token.
+        auth_client = create_client(
             SUPABASE_URL,
             SUPABASE_KEY,
-            options=ClientOptions(
-                headers={
-                    "Authorization":f"Bearer {token}"
-                },auto_refresh_token=False,
-                persist_session=False,
-            ),)
-        response= db.auth.get_user(jwt=token)
+        )
 
-        if response.user is None:
+        response = auth_client.auth.get_user(jwt=token)
+        user = response.user
+
+        if user is None:
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or expired access token.",
             )
-        return AuthenticatedUser(
-            user_id=str(response.user.id),
-            access_token=token,
-            db=db
+
+        # Client 2: use the validated user's JWT for database access.
+        user_db = create_client(
+            SUPABASE_URL,
+            SUPABASE_KEY
         )
+
+        user_db.postgrest.auth(token)
+
+        return AuthenticatedUser(
+            user_id=str(user.id),
+            email=user.email,
+            access_token=token,
+            db=user_db,
+        )
+
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as exc:
+        print("AUTH ERROR TYPE:", type(exc).__name__)
+        print("AUTH ERROR:", str(exc))
+
         raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired access token.",
+            status_code=500,
+            detail="Authentication service failed.",
         )
-
-
-        
-        
-    

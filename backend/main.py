@@ -1,8 +1,8 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
-from schemas import ExpenseDraft,CreateExpenseRequest
+from schemas import ExpenseDraft,CreateExpenseRequest, ExpenseUpdateRequest,ExpenseResponse
 from vision import extract_expense_from_receipt
-from database import supabase
+from database import supabase,create_client
 
 from fastapi import Depends
 
@@ -125,6 +125,54 @@ def get_expenses(current_user: AuthenticatedUser = Depends(get_current_user)):
         )
 
     return response.data
+
+@app.patch("/expenses/{expense_id}", response_model=ExpenseResponse):
+def update_expense(
+        expense_id:UUID,
+        updates:ExpenseUpdateRequest,
+        user:dict=Depends(get_current_user),
+):
+    update_data=updates.model_dump(
+        exclude_unset=True,
+        mode="json"
+    )
+
+    if not update_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one field to update.",
+        )
+
+    user_supabase = create_client(user["access_token"])
+
+    try:
+        response=(
+            user_supabase.table("expenses")
+             .update(update_data)
+            .eq("id", str(expense_id))
+            .eq("user_id", user["id"])
+            .select("*")
+            .execute()
+        )
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update expense.",
+        )
+    if not response.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Expense not found or you do not have access to it.",
+        )
+
+    updated_expense = response.data[0]
+
+    return {
+        **updated_expense,
+        "uncertain_fields": [],
+    }
+    
 
 
 
